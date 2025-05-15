@@ -2,17 +2,26 @@
   "manifest_version": 3,
   "name": "Gmail Thread Summarizer",
   "version": "1.0",
-  "description": "Tracks and summarizes emails from a vendor.",
-  "permissions": ["identity", "storage", "alarms"],
+  "description": "Tracks emails from a vendor and summarizes threads using Groq LLM.",
+  "permissions": ["identity", "storage", "scripting", "activeTab"],
+  "host_permissions": [
+    "https://mail.google.com/*",
+    "https://gmail.googleapis.com/*",
+    "https://api.groq.com/*"
+  ],
   "oauth2": {
     "client_id": "156080721894-o8p8o0mm1oek0aek56ek7nne9je1uqu8.apps.googleusercontent.com",
     "scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
   },
   "background": {
-    "service_worker": "dist/background.js"
+    "service_worker": "dist/background.js",
+    "type": "module"
   },
   "action": {
-    "default_title": "Gmail Thread Summarizer",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_title": "Summarize Gmail Threads"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
   }
 }

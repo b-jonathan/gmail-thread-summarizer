@@ -11,10 +11,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     chrome.storage.local.set({ vendorEmail: email }, () => {
-      alert("Email saved!");
-
       // 🔄 Send message to background script to begin tracking
-      chrome.runtime.sendMessage({ action: "trackVendorEmail", email });
+      console.log(email);
+      chrome.runtime.sendMessage({ action: "trackVendorEmail", email: email });
     });
   });
 
