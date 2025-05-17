@@ -1,8 +1,17 @@
 {
-  "devDependencies": {
-    "@types/chrome": "^0.0.322"
+  "name": "gmail-thread-summarizer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
   },
-  "dependencies": {
-    "typescript": "^5.8.3"
+  "devDependencies": {
+    "@types/chrome": "^0.0.322",
+    "@types/node": "^22.15.18",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5"
   }
 }

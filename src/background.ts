@@ -5,49 +5,46 @@ type GroqMessage = {
 
 type ThreadSummary = {
   subject: string;
-  snippet: string;
+  body: string;
 };
 
-chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === "trackVendorEmail" && message.email) {
-    console.log("Starting tracking for:", message.email);
+    console.log("📩 Received message:", message);
 
-    const threadSummaries = await runGmailQuery(message.email);
-    console.log(threadSummaries);
-    const apiKey = "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";
+    // ✅ Use an IIFE to preserve the port
+    (async () => {
+      try {
+        const threadSummaries = await runGmailQuery(message.email);
+        const apiKey = import.meta.env.VITE_GROQ_API_KEY;
 
-    if (!apiKey) {
-      console.warn("No Groq API key found in storage.");
-      return;
-    }
+        if (!apiKey) {
+          sendResponse({ summary: "No API key found." });
+          return;
+        }
 
-    summarizeWithGroq(threadSummaries, apiKey, (summary: string) => {
-      console.log("💡 Summary from Groq:", summary);
+        const summary = await summarizeWithGroq(threadSummaries, apiKey);
+        console.log("✅ Sending summary response");
+        sendResponse({ summary: summary }); // ✅ MUST call this
+      } catch (err) {
+        console.error("❌ Error:", err);
+        sendResponse({ summary: "Error generating summary." });
+      }
+    })();
 
-      // ✅ Store it for later use (e.g., by popup)
-      chrome.storage.local.set({ lastSummary: summary });
-
-      // ✅ Optionally, respond immediately to the sender
-      sendResponse({ summary });
-    });
-
-    // Required if you plan to respond asynchronously
-    return true;
+    return true; // ✅ Keeps the port open
   }
 });
 
 async function summarizeWithGroq(
   threadSummaries: ThreadSummary[],
-  apiKey: string,
-  callback?: (summary: string) => void
-): Promise<void> {
+  apiKey: string
+): Promise<string> {
   const model = "llama3-70b-8192";
   const formattedThread = threadSummaries
     .map(
       (entry, index) =>
-        `Email ${index + 1}:\nSubject: ${entry.subject}\nSnippet: ${
-          entry.snippet
-        }`
+        `Email ${index + 1}:\nSubject: ${entry.subject}\nBody: ${entry.body}`
     )
     .join("\n\n");
 
@@ -56,8 +53,16 @@ async function summarizeWithGroq(
   const messages: GroqMessage[] = [
     {
       role: "system",
-      content:
-        "You are an assistant that summarizes email threads clearly and concisely.",
+      content: `You are an assistant that extracts structured information from email threads.
+  
+  Your job is to return a clear and concise summary in the following list format of the most recent updates regarding each of these bullet points:
+  - **Client Name**: (Extracted from email signature or greeting. If not found, write "Not found")
+  - **Date**: (Any mention of the date for the event or meeting. If not found, write "Not found")
+  - **Time**: (Time of day, including AM/PM if available. If not found, write "Not found")
+  - **Location**: (Physical address or venue if mentioned. If not found, write "Not found")
+  - **List of Items Required**: (Bullet list of any requested or discussed items, also list the prices next to the items. If not found, write "Not found")
+  - **Special Notes**: (Any special mentions specific to the client, If not found, write "Not found")
+  Be concise and only include these fields. Do not add explanations or filler text.`,
     },
     {
       role: "user",
@@ -87,12 +92,12 @@ async function summarizeWithGroq(
     const summary =
       data.choices?.[0]?.message?.content ?? "No summary returned.";
 
-    console.log("📝 LLM Summary:\n", summary);
+    //console.log("📝 LLM Summary:\n", summary);
 
-    if (callback) callback(summary);
+    return summary;
   } catch (error) {
     console.error("Groq API call failed:", error);
-    if (callback) callback("Failed to generate summary.");
+    return "Failed to generate summary.";
   }
 }
 
@@ -103,7 +108,7 @@ async function runGmailQuery(vendorEmail: string): Promise<ThreadSummary[]> {
         if (chrome.runtime.lastError || !token) {
           reject(chrome.runtime.lastError?.message || "Token fetch failed");
         } else {
-          console.log(resolve(token as string));
+          resolve(token as string);
         }
       });
     });
@@ -131,8 +136,41 @@ async function runGmailQuery(vendorEmail: string): Promise<ThreadSummary[]> {
       const subject =
         msg.payload.headers.find((h: any) => h.name === "Subject")?.value ??
         "No subject";
-      const snippet = msg.snippet ?? "";
-      return { subject, snippet };
+      //const snippet = msg.snippet ?? "";
+      // Get the body from the payload
+      let body = "";
+
+      if (msg.payload.parts && Array.isArray(msg.payload.parts)) {
+        // Multipart email — try to find the 'text/plain' part first
+        const plainPart = msg.payload.parts.find(
+          (part: any) => part.mimeType === "text/plain"
+        );
+
+        if (plainPart?.body?.data) {
+          body = atob(
+            plainPart.body.data.replace(/-/g, "+").replace(/_/g, "/")
+          );
+        } else {
+          // Fallback: try 'text/html' if plain text isn't available
+          const htmlPart = msg.payload.parts.find(
+            (part: any) => part.mimeType === "text/html"
+          );
+
+          if (htmlPart?.body?.data) {
+            body = atob(
+              htmlPart.body.data.replace(/-/g, "+").replace(/_/g, "/")
+            );
+          }
+        }
+      } else if (msg.payload.body?.data) {
+        // Single-part message
+        body = atob(
+          msg.payload.body.data.replace(/-/g, "+").replace(/_/g, "/")
+        );
+      }
+
+      return { subject, body };
+      //   return { subject, snippet };
     });
 
     console.log("✅ Thread summaries:", threadSummaries);
