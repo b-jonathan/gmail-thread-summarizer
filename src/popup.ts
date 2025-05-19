@@ -1,44 +1,15 @@
 document.addEventListener("DOMContentLoaded", () => {
-  const saveButton = document.getElementById("saveEmail") as HTMLButtonElement;
-  const emailInput = document.getElementById("vendorEmail") as HTMLInputElement;
+  const button = document.getElementById("summarizeBtn") as HTMLButtonElement;
+  const loading = document.getElementById("loading")!;
+  const summaryDiv = document.getElementById("summary")!;
 
-  saveButton.addEventListener("click", () => {
-    const email = emailInput.value.trim();
+  button.addEventListener("click", () => {
+    loading.style.display = "block";
+    summaryDiv.textContent = "";
 
-    if (!email || !email.includes("@")) {
-      alert("Please enter a valid email address.");
-      return;
-    }
-
-    // Save email to storage
-    chrome.storage.local.set({ vendorEmail: email }, () => {
-      // 🔥 Trigger background process
-      chrome.runtime.sendMessage(
-        { action: "trackVendorEmail", email },
-        (response) => {
-          console.log("here");
-          console.log(response);
-          if (chrome.runtime.lastError) {
-            console.error(
-              "❌ Error sending message:",
-              chrome.runtime.lastError.message
-            );
-            return;
-          }
-          if (response?.summary) {
-            alert("test");
-            console.log("📝 Summary received:", response.summary);
-            console.log("Summary:\n\n" + response.summary);
-          }
-        }
-      );
+    chrome.runtime.sendMessage({ action: "summarizeThread" }, (response) => {
+      loading.style.display = "none";
+      summaryDiv.textContent = response?.summary || "No summary received.";
     });
-  });
-
-  // Optional: preload saved email on load
-  chrome.storage.local.get("vendorEmail", (result) => {
-    if (result.vendorEmail) {
-      emailInput.value = result.vendorEmail;
-    }
   });
 });

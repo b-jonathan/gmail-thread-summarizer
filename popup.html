@@ -1,36 +1,29 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Track Email</title>
+    <title>Summarize Thread</title>
     <style>
       body {
         font-family: sans-serif;
-        padding: 10px;
-        width: 250px;
+        padding: 1rem;
+        width: 300px;
       }
-      input {
-        width: 100%;
-        padding: 8px;
-        margin-top: 6px;
-        margin-bottom: 10px;
-        box-sizing: border-box;
+      #loading {
+        display: none;
+        margin-top: 1rem;
       }
-      button {
-        width: 100%;
-        padding: 8px;
-        background-color: #4caf50;
-        color: white;
-        border: none;
-        cursor: pointer;
+      #summary {
+        margin-top: 1rem;
+        white-space: pre-wrap;
       }
     </style>
   </head>
   <body>
-    <label for="vendorEmail">Vendor Email:</label>
-    <input type="email" id="vendorEmail" placeholder="apply@ycombinator.com" />
-    <button id="saveEmail">Save Email</button>
+    <button id="summarizeBtn">Summarize</button>
+    <div id="loading">Summarizing...</div>
+    <div id="summary"></div>
 
-    <script type="module" src="/src/popup.ts"></script>
+    <script type="module" src="./src/popup.ts"></script>
   </body>
 </html>

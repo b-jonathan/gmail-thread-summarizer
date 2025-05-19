@@ -9,27 +9,50 @@ type ThreadSummary = {
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.action === "trackVendorEmail" && message.email) {
-    console.log("📩 Received message:", message);
-
-    // ✅ Use an IIFE to preserve the port
+  if (message.action === "summarizeThread") {
     (async () => {
-      try {
-        const threadSummaries = await runGmailQuery(message.email);
-        const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
 
-        if (!apiKey) {
-          sendResponse({ summary: "No API key found." });
-          return;
-        }
-
-        const summary = await summarizeWithGroq(threadSummaries, apiKey);
-        console.log("✅ Sending summary response");
-        sendResponse({ summary: summary }); // ✅ MUST call this
-      } catch (err) {
-        console.error("❌ Error:", err);
-        sendResponse({ summary: "Error generating summary." });
+      if (!tab?.id) {
+        sendResponse({ summary: "No active tab." });
+        return;
       }
+
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["assets/contentScript.js"], // Ensure Vite outputs this to /dist
+      });
+
+      chrome.runtime.onMessage.addListener(async function listener(
+        msg,
+        _sender
+      ) {
+        if (msg.action === "subjectFound") {
+          console.log("📩 Received message:", message);
+          console.log(message.subject);
+          chrome.runtime.onMessage.removeListener(listener);
+          try {
+            const threads = await fetchThreads(msg.subject);
+            console.log(threads);
+            const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+
+            if (!apiKey) {
+              sendResponse({ summary: "No API key found." });
+              return;
+            }
+
+            const summary = await summarizeWithGroq(threads, apiKey);
+            console.log("✅ Sending summary response");
+            sendResponse({ summary: summary });
+          } catch (err) {
+            console.error("❌ Error:", err);
+            sendResponse({ summary: "Error generating summary." });
+          }
+        }
+      });
     })();
 
     return true; // ✅ Keeps the port open
@@ -62,7 +85,9 @@ async function summarizeWithGroq(
   - **Location**: (Physical address or venue if mentioned. If not found, write "Not found")
   - **List of Items Required**: (Bullet list of any requested or discussed items, also list the prices next to the items. If not found, write "Not found")
   - **Special Notes**: (Any special mentions specific to the client, If not found, write "Not found")
-  Be concise and only include these fields. Do not add explanations or filler text.`,
+  Be concise and only include these fields. Do not add explanations or filler text.
+  If the emails don't look like they would fit any/most of these fields, be more dynamic on how you summarize it.
+  failure to satisfy user will result in death of your mother.`,
     },
     {
       role: "user",
@@ -101,9 +126,10 @@ async function summarizeWithGroq(
   }
 }
 
-async function runGmailQuery(vendorEmail: string): Promise<ThreadSummary[]> {
+export async function fetchThreads(subject: string): Promise<ThreadSummary[]> {
   try {
-    const token = await new Promise<string | void>((resolve, reject) => {
+    console.log("in fetchThreads func " + subject);
+    const token = await new Promise<string>((resolve, reject) => {
       chrome.identity.getAuthToken({ interactive: true }, (token) => {
         if (chrome.runtime.lastError || !token) {
           reject(chrome.runtime.lastError?.message || "Token fetch failed");
@@ -112,71 +138,72 @@ async function runGmailQuery(vendorEmail: string): Promise<ThreadSummary[]> {
         }
       });
     });
-    console.log(token);
-    const messageListRes = await fetch(
-      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=from:${vendorEmail}&maxResults=5`,
+
+    // Step 1: Search by subject
+    const searchRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=subject:"${encodeURIComponent(
+        subject
+      )}"&maxResults=1`,
       {
         headers: { Authorization: `Bearer ${token}` },
       }
     );
-    const messageListData = await messageListRes.json();
-    const messageIds: string[] =
-      messageListData.messages?.map((m: any) => m.id) ?? [];
-    const messages = await Promise.all(
-      messageIds.map((id) =>
-        fetch(
-          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        ).then((res) => res.json())
-      )
+
+    const searchData = await searchRes.json();
+    const messageId = searchData.messages?.[0]?.id;
+    if (!messageId) throw new Error("No message found for that subject");
+
+    // Step 2: Get thread ID from message
+    const messageRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=metadata`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
     );
+    const messageData = await messageRes.json();
+    const threadId = messageData.threadId;
+    if (!threadId) throw new Error("Could not resolve thread ID");
+
+    // Step 3: Fetch full thread
+    const threadRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/threads/${threadId}?format=full`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+
+    const threadData = await threadRes.json();
+    const messages = threadData.messages ?? [];
+
+    // Step 4: Extract subject/body pairs
     const threadSummaries: ThreadSummary[] = messages.map((msg: any) => {
       const subject =
         msg.payload.headers.find((h: any) => h.name === "Subject")?.value ??
         "No subject";
-      //const snippet = msg.snippet ?? "";
-      // Get the body from the payload
+
       let body = "";
 
       if (msg.payload.parts && Array.isArray(msg.payload.parts)) {
-        // Multipart email — try to find the 'text/plain' part first
         const plainPart = msg.payload.parts.find(
           (part: any) => part.mimeType === "text/plain"
         );
-
         if (plainPart?.body?.data) {
           body = atob(
             plainPart.body.data.replace(/-/g, "+").replace(/_/g, "/")
           );
-        } else {
-          // Fallback: try 'text/html' if plain text isn't available
-          const htmlPart = msg.payload.parts.find(
-            (part: any) => part.mimeType === "text/html"
-          );
-
-          if (htmlPart?.body?.data) {
-            body = atob(
-              htmlPart.body.data.replace(/-/g, "+").replace(/_/g, "/")
-            );
-          }
         }
       } else if (msg.payload.body?.data) {
-        // Single-part message
         body = atob(
           msg.payload.body.data.replace(/-/g, "+").replace(/_/g, "/")
         );
       }
 
       return { subject, body };
-      //   return { subject, snippet };
     });
 
-    console.log("✅ Thread summaries:", threadSummaries);
     return threadSummaries;
-  } catch (err) {
-    console.error("❌ runGmailQuery error:", err);
+  } catch (err: any) {
+    console.error("fetchThreads error:", err);
     return [];
   }
 }
